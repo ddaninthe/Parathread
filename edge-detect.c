@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <dirent.h>
+#include <pthread.h>
 
 /*
 	//gcc edge-detect.c bitmap.c -O2 -ftree-vectorize -fopt-info -mavx2 -fopt-info-vec-all
@@ -42,7 +43,11 @@ static Stack stack;
 
 void apply_effect(Image* original, Image* new_i);
 int bmpInFolder(char *dirname);
+void* consumer(void* arg);
 void emptyDir(char* path);
+void* producer(void* arg);
+void stack_destroy();
+void stack_init();
 
 void apply_effect(Image* original, Image* new_i) {
 
@@ -106,7 +111,42 @@ void emptyDir(char* path) {
     closedir(dir);
 }
 
-static Stack stack;
+void stack_init() {
+        pthread_cond_init(&stack.can_produce, NULL);
+        pthread_cond_init(&stack.can_consume, NULL);
+        pthread_mutex_init(&stack.lock, NULL);
+        stack.max = STACK_MAX;
+        stack.count = 0;
+}
+
+void stack_destroy() {
+	pthread_cond_destroy(&stack.can_consume);
+	pthread_cond_destroy(&stack.can_produce);
+	pthread_mutex_destroy(&stack.lock);
+}
+
+void* producer(void* arg) {
+	printf("Producer created\n");
+	/*
+	while(stack.count >= stack.max) {
+		pthread_cond_wait(&stack.can_produce);
+	}
+
+	Image img = open_bitmap("bmp_tank.bmp");
+	Image new_i;
+	apply_effect(&img, &new_i);*/
+}
+
+void* consumer(void* arg) {
+	char* folder = (char*) arg;
+	printf("Consumer folder: %s\n", folder);
+	/*
+	while (stack.count < 1) {
+		pthread_cond_wait(&stack.can_consume);
+	}
+	save_bitmap(new_i, outputFolder + "filename.bmp");*/
+	sleep(1);
+}
 
 int main(int argc, char** argv) {
 	if (argc < NB_PARAMS) {
@@ -134,39 +174,29 @@ int main(int argc, char** argv) {
         return 0;
     }
     printf("Number of threads: %d\n", threadCount);
-    
+
+    stack_init();
     // Algorithm
     char* algo = argv[4];
-    if (strcmp(algo, "boxblur") == 0) {
-        printf("Boxblur\n");
-    } else if (strcmp(algo, "edgedetect") == 0) {
-        printf("Edge Detect\n");
-    } else if (strcmp(algo, "sharpen") == 0) {
-        printf("Sharpen\n");
-    } else {
+    if (strcmp(algo, "boxblur") && strcmp(algo, "edgedetect") && strcmp(algo, "sharpen")) {
         printf("Invalid algorithm. Please use one of the followings: boxblur, edgedetect, sharpen\n");
         return 0;
     }
     
-	/*pthread_t threads[PRODUCER_COUNT + 1];
-	stack.count = 0;
-
-	pthread_mutex_init(stack.lock);
-
+	pthread_t threads[threadCount + 1];
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);	
 
-    for(int i = 0; i < PRODUCER_COUNT; i++) {
-        pthread_create(&threads_id[i], &attr, producer, NULL);
-	}*/
+    for(int i = 0; i < threadCount; i++) {
+        pthread_create(&threads[i], &attr, producer, NULL);
+	}
+	pthread_create(&threads[threadCount], NULL, consumer, (void*) outputFolder);
 
-	/*Image img = open_bitmap("bmp_tank.bmp");
-	Image new_i;
-	apply_effect(&img, &new_i);
-	save_bitmap(new_i, "test_out.bmp");
-*/
-	//pthread_mutex_destroy(stack.lock);
+	pthread_join(threads[threadCount], NULL);
+
+	stack_destroy();
+	pthread_attr_destroy(&attr);
 
 	return 0;
 }
