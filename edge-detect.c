@@ -113,7 +113,7 @@ void emptyDir(char* path) {
     char filepath[256];
     while ((file = readdir(dir)) != NULL )
     {
-        sprintf(filepath, "%s/%s", path, file->d_name);
+        sprintf(filepath, "%s%s", path, file->d_name);
         remove(filepath);
     }
     closedir(dir);
@@ -135,7 +135,7 @@ void stack_init(char* directory, int nbFiles) {
 	while (n < nbFiles && (file = readdir(dir)) != NULL) {
 		char* extension = strrchr(file->d_name, '.');
 		if (extension && !strcmp(extension, ".bmp")) {
-			stack.allFilenames[n++] = (char*) file->d_name;
+			stack.allFilenames[n++] = file->d_name;
 		}
 	}
 	closedir(dir);
@@ -148,11 +148,11 @@ void stack_destroy() {
 }
 
 void* producer(void* arg) {
+	printf("\n");
     printf("Producer Files:\n");
 	for (int i = 0; i < stack.nbFiles; i++) {
 		printf("%d: %s\n", i, stack.allFilenames[i]);
 	}
-	printf("\n");
 
 	printf("Producer created\n");
 	char* inputFolder = (char*) arg;
@@ -174,11 +174,12 @@ void* producer(void* arg) {
 
 		Image img = open_bitmap(filepath);
 		Image_File new_bmp;
-		new_bmp.filename = filename;
+		new_bmp.filename = filename; // Non fonctionnel
 
 		apply_effect(&img, &new_bmp.image);
 		printf("Applied effect: %s\n", filepath);
 
+		printf("Image: %s\n", new_bmp.filename);
 		pthread_mutex_lock(&stack.lock);
 		stack.data[stack.count++] = new_bmp;
 		pthread_cond_signal(&stack.can_consume);
@@ -188,11 +189,11 @@ void* producer(void* arg) {
 }
 
 void* consumer(void* arg) {
+	printf("\n");
     printf("Consumer Files:\n");
 	for (int i = 0; i < stack.nbFiles; i++) {
 		printf("%d: %s\n", i, stack.allFilenames[i]);
 	}
-	printf("\n");
 
 	printf("Consumer created\n");
 	int index, processed = 0;
@@ -207,7 +208,10 @@ void* consumer(void* arg) {
 		pthread_mutex_unlock(&stack.lock);
 
 		char* filepath[256];
-		Image_File file = stack.data[index];
+		Image_File file = stack.data[index]; 
+
+		printf("Con Image: %s\n", file.filename);  // TODO: retourne chaine vide
+
 		sprintf(filepath, "%s%s", outputFolder, file.filename);
 		save_bitmap(file.image, filepath);
 		processed++;
@@ -218,8 +222,8 @@ void* consumer(void* arg) {
 		pthread_cond_signal(&stack.can_produce);
 		pthread_mutex_unlock(&stack.lock);
 
-		sleep(1);
 	}
+		sleep(1);
 	printf("Consumer finished\n");
 }
 
@@ -262,7 +266,7 @@ int main(int argc, char** argv) {
 	pthread_t threads[threadCount + 1];
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);	
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
 	printf("After Files:\n");
 	for (int i = 0; i < stack.nbFiles; i++) {
@@ -273,8 +277,8 @@ int main(int argc, char** argv) {
     for(int i = 0; i < threadCount; i++) {
         pthread_create(&threads[i], &attr, producer, (void*) inputFolder);
 	}
-	pthread_create(&threads[threadCount], NULL, consumer, (void*) outputFolder);
 
+	pthread_create(&threads[threadCount], NULL, consumer, (void*) outputFolder);
 	pthread_join(threads[threadCount], NULL);
 
 	stack_destroy();
