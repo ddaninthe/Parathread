@@ -22,6 +22,11 @@ const float KERNEL[DIM][DIM] = {{-1, -1,-1},
 							   {-1,8,-1},
 							   {-1,-1,-1}};
 
+typedef struct Image_File_t {
+	Image image;
+	char* filename;
+} Image_File;
+
 typedef struct Color_t {
 	float Red;
 	float Green;
@@ -29,12 +34,15 @@ typedef struct Color_t {
 } Color_e;
 
 typedef struct stack_t {
-        int data[STACK_MAX];
-        int count;
-        int max;
+        Image_File data[STACK_MAX];
+        int count; // Current stack size
+        int max; // Max size of stack
+       	int nbFiles; // Number of file to convert
         pthread_mutex_t lock;
         pthread_cond_t can_consume;
         pthread_cond_t can_produce;
+       	int conversionAmount; // Amount of file converted or being converted <= index for next file
+       	char* allFilenames[]; // All filepaths to convert
 } Stack;
 
 //on pourrait passer une structure en parametres
@@ -105,18 +113,32 @@ void emptyDir(char* path) {
     char filepath[256];
     while ((file = readdir(dir)) != NULL )
     {
-        sprintf(filepath, "%s/%s", path, file->d_name);
+        sprintf(filepath, "%s%s", path, file->d_name);
         remove(filepath);
     }
     closedir(dir);
 }
 
-void stack_init() {
-        pthread_cond_init(&stack.can_produce, NULL);
-        pthread_cond_init(&stack.can_consume, NULL);
-        pthread_mutex_init(&stack.lock, NULL);
-        stack.max = STACK_MAX;
-        stack.count = 0;
+void stack_init(char* directory, int nbFiles) {
+    pthread_cond_init(&stack.can_produce, NULL);
+    pthread_cond_init(&stack.can_consume, NULL);
+    pthread_mutex_init(&stack.lock, NULL);
+    stack.max = STACK_MAX;
+    stack.count = 0;
+    stack.allFilenames[nbFiles];
+    stack.nbFiles = nbFiles;
+	stack.conversionAmount = 0;
+
+	DIR *dir = opendir(directory);
+	struct dirent *file;
+	int n = 0;
+	while (n < nbFiles && (file = readdir(dir)) != NULL) {
+		char* extension = strrchr(file->d_name, '.');
+		if (extension && !strcmp(extension, ".bmp")) {
+			stack.allFilenames[n++] = file->d_name;
+		}
+	}
+	closedir(dir);
 }
 
 void stack_destroy() {
@@ -127,25 +149,71 @@ void stack_destroy() {
 
 void* producer(void* arg) {
 	printf("Producer created\n");
-	/*
-	while(stack.count >= stack.max) {
-		pthread_cond_wait(&stack.can_produce);
-	}
+	char* inputFolder = (char*) arg;
+	
+	while (stack.conversionAmount < stack.nbFiles) {
+		pthread_mutex_lock(&stack.lock);
+		while(stack.count >= stack.max) {
+			pthread_cond_wait(&stack.can_produce, &stack.lock);
+		}
+		if (stack.conversionAmount >= stack.nbFiles) {
+			pthread_mutex_unlock(&stack.lock);
+			break;
+		}
 
-	Image img = open_bitmap("bmp_tank.bmp");
-	Image new_i;
-	apply_effect(&img, &new_i);*/
+		int current = stack.conversionAmount++;
+		pthread_mutex_unlock(&stack.lock);
+
+		char* filename = stack.allFilenames[current];
+		char filepath[256];
+
+		sprintf(filepath, "%s%s", inputFolder, filename);
+
+		Image img = open_bitmap(filepath);
+		Image_File new_bmp;
+		new_bmp.filename = malloc(strlen(filename) + 1);
+		strcpy(new_bmp.filename, filename);
+
+		apply_effect(&img, &new_bmp.image);
+		printf("Applied effect on file: %s\n", filepath);
+
+		pthread_mutex_lock(&stack.lock);
+		stack.data[stack.count++] = new_bmp;
+		pthread_cond_signal(&stack.can_consume);
+		pthread_mutex_unlock(&stack.lock);
+	}
+	printf("Producer finished\n");
 }
 
 void* consumer(void* arg) {
-	char* folder = (char*) arg;
-	printf("Consumer folder: %s\n", folder);
-	/*
-	while (stack.count < 1) {
-		pthread_cond_wait(&stack.can_consume);
+	printf("Consumer created\n");
+	int index, processed = 0;
+	char* outputFolder = (char*) arg;
+
+	while(processed < stack.nbFiles) {
+		pthread_mutex_lock(&stack.lock);
+		while (stack.count < 1) {
+			pthread_cond_wait(&stack.can_consume, &stack.lock);
+		}
+		index = stack.count-1;
+		Image_File file = stack.data[index];
+		//pthread_mutex_unlock(&stack.lock); 
+
+		char filepath[256];
+
+		sprintf(filepath, "%s%s", outputFolder, file.filename);
+		save_bitmap(file.image, filepath);
+		processed++;
+		printf("\nOutput file: %s. Total: %d\n", filepath, processed);
+
+		//pthread_mutex_lock(&stack.lock);
+		stack.count--;
+		pthread_cond_signal(&stack.can_produce);
+		pthread_mutex_unlock(&stack.lock);
 	}
-	save_bitmap(new_i, outputFolder + "filename.bmp");*/
+
 	sleep(1);
+	printf("Consumer finished\n");
 }
 
 int main(int argc, char** argv) {
@@ -161,42 +229,53 @@ int main(int argc, char** argv) {
     	printf("No image to process.\n");
     	return 0;
     }
-    printf("Images to process: %d\n", nbImages);
+    //printf("Images to process: %d\n", nbImages);  // Bug mémoire si décommenté
     
     // Output folder
     char* outputFolder = argv[2];
     emptyDir(outputFolder);
 
-    // Thread number
+    // Number of threads
     int threadCount = atoi(argv[3]);
     if (threadCount <= 0 || threadCount > nbImages) {
         printf("Invalid number of threads: %d\n", threadCount);
         return 0;
     }
-    printf("Number of threads: %d\n", threadCount);
+    //printf("Number of threads: %d\n", threadCount);  // Bug mémoire si décommenté
 
-    stack_init();
     // Algorithm
     char* algo = argv[4];
     if (strcmp(algo, "boxblur") && strcmp(algo, "edgedetect") && strcmp(algo, "sharpen")) {
         printf("Invalid algorithm. Please use one of the followings: boxblur, edgedetect, sharpen\n");
         return 0;
     }
-    
+
+    stack_init(inputFolder, nbImages);
+
 	pthread_t threads[threadCount + 1];
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);	
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+	printf("After Files:\n");
+	for (int i = 0; i < stack.nbFiles; i++) {
+		printf("%d: %s\n", i, stack.allFilenames[i]);
+	}
 
     for(int i = 0; i < threadCount; i++) {
-        pthread_create(&threads[i], &attr, producer, NULL);
+        pthread_create(&threads[i], &attr, producer, (void*) inputFolder);
 	}
-	pthread_create(&threads[threadCount], NULL, consumer, (void*) outputFolder);
 
+	pthread_create(&threads[threadCount], NULL, consumer, (void*) outputFolder);
 	pthread_join(threads[threadCount], NULL);
 
 	stack_destroy();
 	pthread_attr_destroy(&attr);
+
+	printf("\nEnd Files:\n");
+	for (int i = 0; i < stack.nbFiles; i++) {
+		printf("%d: %s\n", i, stack.allFilenames[i]);
+	}
 
 	return 0;
 }
