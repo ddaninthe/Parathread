@@ -148,38 +148,35 @@ void stack_destroy() {
 }
 
 void* producer(void* arg) {
-	printf("\n");
-    printf("Producer Files:\n");
-	for (int i = 0; i < stack.nbFiles; i++) {
-		printf("%d: %s\n", i, stack.allFilenames[i]);
-	}
-
 	printf("Producer created\n");
 	char* inputFolder = (char*) arg;
 	
-	int current;
 	while (stack.conversionAmount < stack.nbFiles) {
 		pthread_mutex_lock(&stack.lock);
 		while(stack.count >= stack.max) {
 			pthread_cond_wait(&stack.can_produce, &stack.lock);
 		}
-		current = stack.conversionAmount++;
+		if (stack.conversionAmount >= stack.nbFiles) {
+			pthread_mutex_unlock(&stack.lock);
+			break;
+		}
+
+		int current = stack.conversionAmount++;
 		pthread_mutex_unlock(&stack.lock);
 
 		char* filename = stack.allFilenames[current];
-		char* filepath[256];
+		char filepath[256];
 
 		sprintf(filepath, "%s%s", inputFolder, filename);
-		printf("Path: %s\n", filepath);
 
 		Image img = open_bitmap(filepath);
 		Image_File new_bmp;
-		new_bmp.filename = filename; // Non fonctionnel
+		new_bmp.filename = malloc(strlen(filename) + 1);
+		strcpy(new_bmp.filename, filename);
 
 		apply_effect(&img, &new_bmp.image);
-		printf("Applied effect: %s\n", filepath);
+		printf("Applied effect on file: %s\n", filepath);
 
-		printf("Image: %s\n", new_bmp.filename);
 		pthread_mutex_lock(&stack.lock);
 		stack.data[stack.count++] = new_bmp;
 		pthread_cond_signal(&stack.can_consume);
@@ -189,12 +186,6 @@ void* producer(void* arg) {
 }
 
 void* consumer(void* arg) {
-	printf("\n");
-    printf("Consumer Files:\n");
-	for (int i = 0; i < stack.nbFiles; i++) {
-		printf("%d: %s\n", i, stack.allFilenames[i]);
-	}
-
 	printf("Consumer created\n");
 	int index, processed = 0;
 	char* outputFolder = (char*) arg;
@@ -204,26 +195,24 @@ void* consumer(void* arg) {
 		while (stack.count < 1) {
 			pthread_cond_wait(&stack.can_consume, &stack.lock);
 		}
-		index = stack.count;
-		pthread_mutex_unlock(&stack.lock);
+		index = stack.count-1;
+		Image_File file = stack.data[index];
+		//pthread_mutex_unlock(&stack.lock); 
 
-		char* filepath[256];
-		Image_File file = stack.data[index]; 
-
-		printf("Con Image: %s\n", file.filename);  // TODO: retourne chaine vide
+		char filepath[256];
 
 		sprintf(filepath, "%s%s", outputFolder, file.filename);
 		save_bitmap(file.image, filepath);
 		processed++;
-		printf("File processed: %s. Total: %d\n", filepath, processed);
+		printf("\nOutput file: %s. Total: %d\n", filepath, processed);
 
-		pthread_mutex_lock(&stack.lock);
+		//pthread_mutex_lock(&stack.lock);
 		stack.count--;
 		pthread_cond_signal(&stack.can_produce);
 		pthread_mutex_unlock(&stack.lock);
-
 	}
-		sleep(1);
+
+	sleep(1);
 	printf("Consumer finished\n");
 }
 
@@ -240,7 +229,7 @@ int main(int argc, char** argv) {
     	printf("No image to process.\n");
     	return 0;
     }
-    printf("Images to process: %d\n", nbImages);
+    //printf("Images to process: %d\n", nbImages);  // Bug mémoire si décommenté
     
     // Output folder
     char* outputFolder = argv[2];
@@ -252,7 +241,7 @@ int main(int argc, char** argv) {
         printf("Invalid number of threads: %d\n", threadCount);
         return 0;
     }
-    printf("Number of threads: %d\n", threadCount);
+    //printf("Number of threads: %d\n", threadCount);  // Bug mémoire si décommenté
 
     // Algorithm
     char* algo = argv[4];
@@ -272,7 +261,6 @@ int main(int argc, char** argv) {
 	for (int i = 0; i < stack.nbFiles; i++) {
 		printf("%d: %s\n", i, stack.allFilenames[i]);
 	}
-	printf("\n");
 
     for(int i = 0; i < threadCount; i++) {
         pthread_create(&threads[i], &attr, producer, (void*) inputFolder);
@@ -283,6 +271,11 @@ int main(int argc, char** argv) {
 
 	stack_destroy();
 	pthread_attr_destroy(&attr);
+
+	printf("\nEnd Files:\n");
+	for (int i = 0; i < stack.nbFiles; i++) {
+		printf("%d: %s\n", i, stack.allFilenames[i]);
+	}
 
 	return 0;
 }
