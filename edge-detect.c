@@ -61,7 +61,7 @@ void apply_effect(Image* original, Image* new_i, char* algo);
 int bmpInFolder(char *dirname);
 void* consumer(void* arg);
 void emptyDir(char* path);
-void* producer(void* arg, void* argAlgo);
+void* producer(void* args);
 void stack_destroy();
 void stack_init();
 
@@ -83,17 +83,17 @@ void apply_effect(Image* original, Image* new_i, char* algo) {
 
 					Pixel* p = &original->pixel_data[yn][xn];
 
-					if (algo == "edgedetect") {
+					if (!strcmp(algo, "edgedetect")) {
 						c.Red += ((float) p->r) * KERNEL[a][b];
 						c.Green += ((float) p->g) * KERNEL[a][b];
 						c.Blue += ((float) p->b) * KERNEL[a][b];
 					}
-					else if (algo == "boxblur") {
+					else if (!strcmp(algo, "boxblur")) {
 						c.Red += ((float) p->r) * BOXBLUR[a][b];
 						c.Green += ((float) p->g) * BOXBLUR[a][b];
 						c.Blue += ((float) p->b) * BOXBLUR[a][b];
 					}
-					else if (algo == "sharpen") {
+					else if (!strcmp(algo, "sharpen")) {
 						c.Red += ((float) p->r) * SHARPEN[a][b];
 						c.Green += ((float) p->g) * SHARPEN[a][b];
 						c.Blue += ((float) p->b) * SHARPEN[a][b];
@@ -167,10 +167,10 @@ void stack_destroy() {
 	pthread_mutex_destroy(&stack.lock);
 }
 
-void* producer(void* arg, void* argAlgo) {
+void* producer(void* args) {
 	printf("Producer created\n");
-	char* inputFolder = (char*) arg;
-	char* algo = (char*) argAlgo;
+	char* inputFolder = (char*) args;
+	char* algo = (char*) args + 1;
 	
 	while (stack.conversionAmount < stack.nbFiles) {
 		pthread_mutex_lock(&stack.lock);
@@ -283,8 +283,11 @@ int main(int argc, char** argv) {
 		printf("%d: %s\n", i, stack.allFilenames[i]);
 	}
 
+	char* argProducer[] = {inputFolder, algo};
+	
     for(int i = 0; i < threadCount; i++) {
-        pthread_create(&threads[i], &attr, producer, ((void*) inputFolder, (void*) algo));
+        //pthread_create(&threads[i], &attr, producer, ((void*) inputFolder, (void*) algo));
+		pthread_create(&threads[i], &attr, producer, (void*) argProducer);
 	}
 
 	pthread_create(&threads[threadCount], NULL, consumer, (void*) outputFolder);
