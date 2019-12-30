@@ -18,13 +18,13 @@
 #define LENGTH DIM
 #define OFFSET DIM /2
 
-const float KERNEL[DIM][DIM] = {{-1, -1,-1},
-							   {-1,8,-1},
-							   {-1,-1,-1}};
+const float KERNEL[DIM][DIM] = {{-1, -1, -1},
+							   {-1, 8, -1},
+							   {-1, -1, -1}};
 							   
-const float BOXBLUR[DIM][DIM] = {{1/9, 1/9, 1/9},
-							   {1/9,1/9, 1/9},
-							   {1/9, 1/9, 1/9}};
+const float BOXBLUR[DIM][DIM] = {{1.0f/9, 1.0f/9, 1.0f/9},
+							   {1.0f/9, 1.0f/9, 1.0f/9},
+							   {1.0f/9, 1.0f/9, 1.0f/9}};
 
 const float SHARPEN[DIM][DIM] = {{0, -1, 0},
 							   {-1, 5, -1},
@@ -40,6 +40,11 @@ typedef struct Color_t {
 	float Green;
 	float Blue;
 } Color_e;
+
+typedef struct Producer_Arg_t {
+	char* inputFolder;
+	char* algo
+} Producer_Arg;
 
 typedef struct stack_t {
         Image_File data[STACK_MAX];
@@ -62,7 +67,7 @@ void apply_effect(Image* original, Image* new_i, char* algo);
 int bmpInFolder(char *dirname);
 void* consumer(void* arg);
 void emptyDir(char* path);
-void* producer(void* arg, void* argAlgo);
+void* producer(void* args);
 void stack_destroy();
 void stack_init();
 
@@ -178,10 +183,11 @@ void stack_destroy() {
 	pthread_mutex_destroy(&stack.lock);
 }
 
-void* producer(void* arg, void* argAlgo) {
+void* producer(void* args) {
 	printf("Producer created\n");
-	char* inputFolder = (char*) arg;
-	char* algo = (char*) argAlgo;
+	Producer_Arg* p_args = (Producer_Arg*) args;
+	char* inputFolder = p_args->inputFolder;
+	char* algo = p_args->algo;
 	
 	while (stack.conversionAmount < stack.nbFiles) {
 		pthread_mutex_lock(&stack.lock);
@@ -294,10 +300,9 @@ int main(int argc, char** argv) {
 		printf("%d: %s\n", i, stack.allFilenames[i]);
 	}
 
-	char* argProducer[] = {inputFolder, algo};
-	
+	Producer_Arg args = {inputFolder, algo};
     for(int i = 0; i < threadCount; i++) {
-		pthread_create(&threads[i], &attr, producer, ((void*) inputFolder, (void*) algo));
+		pthread_create(&threads[i], &attr, producer, (void*) &args);
 	}
 
 	pthread_create(&threads[threadCount], NULL, consumer, (void*) outputFolder);
