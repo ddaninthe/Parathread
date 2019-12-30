@@ -21,6 +21,14 @@
 const float KERNEL[DIM][DIM] = {{-1, -1,-1},
 							   {-1,8,-1},
 							   {-1,-1,-1}};
+							   
+const float BOXBLUR[DIM][DIM] = {{1/9, 1/9, 1/9},
+							   {1/9,1/9, 1/9},
+							   {1/9, 1/9, 1/9}};
+
+const float SHARPEN[DIM][DIM] = {{0, -1, 0},
+							   {-1, 5, -1},
+							   {0, -1, 0}};
 
 typedef struct Image_File_t {
 	Image image;
@@ -49,15 +57,15 @@ typedef struct stack_t {
 //pour eviter les variables globales
 static Stack stack;
 
-void apply_effect(Image* original, Image* new_i);
+void apply_effect(Image* original, Image* new_i, char* algo);
 int bmpInFolder(char *dirname);
 void* consumer(void* arg);
 void emptyDir(char* path);
-void* producer(void* arg);
+void* producer(void* arg, void* argAlgo);
 void stack_destroy();
 void stack_init();
 
-void apply_effect(Image* original, Image* new_i) {
+void apply_effect(Image* original, Image* new_i, char* algo) {
 
 	int w = original->bmp_header.width;
 	int h = original->bmp_header.height;
@@ -75,9 +83,21 @@ void apply_effect(Image* original, Image* new_i) {
 
 					Pixel* p = &original->pixel_data[yn][xn];
 
-					c.Red += ((float) p->r) * KERNEL[a][b];
-					c.Green += ((float) p->g) * KERNEL[a][b];
-					c.Blue += ((float) p->b) * KERNEL[a][b];
+					if (algo == "edgedetect") {
+						c.Red += ((float) p->r) * KERNEL[a][b];
+						c.Green += ((float) p->g) * KERNEL[a][b];
+						c.Blue += ((float) p->b) * KERNEL[a][b];
+					}
+					else if (algo == "boxblur") {
+						c.Red += ((float) p->r) * BOXBLUR[a][b];
+						c.Green += ((float) p->g) * BOXBLUR[a][b];
+						c.Blue += ((float) p->b) * BOXBLUR[a][b];
+					}
+					else if (algo == "sharpen") {
+						c.Red += ((float) p->r) * SHARPEN[a][b];
+						c.Green += ((float) p->g) * SHARPEN[a][b];
+						c.Blue += ((float) p->b) * SHARPEN[a][b];
+					}
 				}
 			}
 
@@ -147,9 +167,10 @@ void stack_destroy() {
 	pthread_mutex_destroy(&stack.lock);
 }
 
-void* producer(void* arg) {
+void* producer(void* arg, void* argAlgo) {
 	printf("Producer created\n");
 	char* inputFolder = (char*) arg;
+	char* algo = (char*) argAlgo;
 	
 	while (stack.conversionAmount < stack.nbFiles) {
 		pthread_mutex_lock(&stack.lock);
@@ -174,7 +195,7 @@ void* producer(void* arg) {
 		new_bmp.filename = malloc(strlen(filename) + 1);
 		strcpy(new_bmp.filename, filename);
 
-		apply_effect(&img, &new_bmp.image);
+		apply_effect(&img, &new_bmp.image, algo);
 		printf("Applied effect on file: %s\n", filepath);
 
 		pthread_mutex_lock(&stack.lock);
@@ -263,7 +284,7 @@ int main(int argc, char** argv) {
 	}
 
     for(int i = 0; i < threadCount; i++) {
-        pthread_create(&threads[i], &attr, producer, (void*) inputFolder);
+        pthread_create(&threads[i], &attr, producer, ((void*) inputFolder, (void*) algo));
 	}
 
 	pthread_create(&threads[threadCount], NULL, consumer, (void*) outputFolder);
