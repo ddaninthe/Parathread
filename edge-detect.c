@@ -18,9 +18,17 @@
 #define LENGTH DIM
 #define OFFSET DIM /2
 
-const float KERNEL[DIM][DIM] = {{-1, -1,-1},
-							   {-1,8,-1},
-							   {-1,-1,-1}};
+const float KERNEL[DIM][DIM] = {{-1, -1, -1},
+							   {-1, 8, -1},
+							   {-1, -1, -1}};
+							   
+const float BOXBLUR[DIM][DIM] = {{1.0f/9, 1.0f/9, 1.0f/9},
+							   {1.0f/9, 1.0f/9, 1.0f/9},
+							   {1.0f/9, 1.0f/9, 1.0f/9}};
+
+const float SHARPEN[DIM][DIM] = {{0, -1, 0},
+							   {-1, 5, -1},
+							   {0, -1, 0}};
 
 typedef struct Image_File_t {
 	Image image;
@@ -32,6 +40,11 @@ typedef struct Color_t {
 	float Green;
 	float Blue;
 } Color_e;
+
+typedef struct Producer_Arg_t {
+	char* inputFolder;
+	char* algo
+} Producer_Arg;
 
 typedef struct stack_t {
         Image_File data[STACK_MAX];
@@ -49,15 +62,39 @@ typedef struct stack_t {
 //pour eviter les variables globales
 static Stack stack;
 
-void apply_effect(Image* original, Image* new_i);
+void inline apply_convolution(Color_e* c, int a, int b, int x, int y, Image* img, char* algo) __attribute__((always_inline));
+void apply_effect(Image* original, Image* new_i, char* algo);
 int bmpInFolder(char *dirname);
 void* consumer(void* arg);
 void emptyDir(char* path);
-void* producer(void* arg);
+void* producer(void* args);
 void stack_destroy();
 void stack_init();
 
-void apply_effect(Image* original, Image* new_i) {
+void apply_convolution(Color_e* restrict c, int a, int b, int x, int y, Image* restrict img, char* algo) {
+	int xn = x + a - OFFSET;
+	int yn = y + b - OFFSET;
+
+	Pixel* p = &img->pixel_data[yn][xn];
+	
+	if (!strcmp(algo, "edgedetect")) {
+		c->Red += ((float) p->r) * KERNEL[a][b];
+		c->Green += ((float) p->g) * KERNEL[a][b];
+		c->Blue += ((float) p->b) * KERNEL[a][b];
+	}
+	else if (!strcmp(algo, "boxblur")) {
+		c->Red += ((float) p->r) * BOXBLUR[a][b];
+		c->Green += ((float) p->g) * BOXBLUR[a][b];
+		c->Blue += ((float) p->b) * BOXBLUR[a][b];
+	}
+	else if (!strcmp(algo, "sharpen")) {
+		c->Red += ((float) p->r) * SHARPEN[a][b];
+		c->Green += ((float) p->g) * SHARPEN[a][b];
+		c->Blue += ((float) p->b) * SHARPEN[a][b];
+	}
+}
+
+void apply_effect(Image* original, Image* new_i, char* algo) {
 
 	int w = original->bmp_header.width;
 	int h = original->bmp_header.height;
@@ -68,18 +105,17 @@ void apply_effect(Image* original, Image* new_i) {
 		for (int x = OFFSET; x < w - OFFSET; x++) {
 			Color_e c = { .Red = 0, .Green = 0, .Blue = 0};
 
-			for(int a = 0; a < LENGTH; a++){
-				for(int b = 0; b < LENGTH; b++){
-					int xn = x + a - OFFSET;
-					int yn = y + b - OFFSET;
+			apply_convolution(&c, 0, 0, x, y, original, algo);
+			apply_convolution(&c, 0, 1, x, y, original, algo);
+			apply_convolution(&c, 0, 2, x, y, original, algo);
 
-					Pixel* p = &original->pixel_data[yn][xn];
+			apply_convolution(&c, 1, 0, x, y, original, algo);
+			apply_convolution(&c, 1, 1, x, y, original, algo);
+			apply_convolution(&c, 1, 2, x, y, original, algo);
 
-					c.Red += ((float) p->r) * KERNEL[a][b];
-					c.Green += ((float) p->g) * KERNEL[a][b];
-					c.Blue += ((float) p->b) * KERNEL[a][b];
-				}
-			}
+			apply_convolution(&c, 2, 0, x, y, original, algo);
+			apply_convolution(&c, 2, 1, x, y, original, algo);
+			apply_convolution(&c, 2, 2, x, y, original, algo);
 
 			Pixel* dest = &new_i->pixel_data[y][x];
 			dest->r = (uint8_t)  (c.Red <= 0 ? 0 : c.Red >= 255 ? 255 : c.Red);
@@ -147,9 +183,11 @@ void stack_destroy() {
 	pthread_mutex_destroy(&stack.lock);
 }
 
-void* producer(void* arg) {
+void* producer(void* args) {
 	printf("Producer created\n");
-	char* inputFolder = (char*) arg;
+	Producer_Arg* p_args = (Producer_Arg*) args;
+	char* inputFolder = p_args->inputFolder;
+	char* algo = p_args->algo;
 	
 	while (stack.conversionAmount < stack.nbFiles) {
 		pthread_mutex_lock(&stack.lock);
@@ -174,7 +212,7 @@ void* producer(void* arg) {
 		new_bmp.filename = malloc(strlen(filename) + 1);
 		strcpy(new_bmp.filename, filename);
 
-		apply_effect(&img, &new_bmp.image);
+		apply_effect(&img, &new_bmp.image, algo);
 		printf("Applied effect on file: %s\n", filepath);
 
 		pthread_mutex_lock(&stack.lock);
@@ -262,8 +300,9 @@ int main(int argc, char** argv) {
 		printf("%d: %s\n", i, stack.allFilenames[i]);
 	}
 
+	Producer_Arg args = {inputFolder, algo};
     for(int i = 0; i < threadCount; i++) {
-        pthread_create(&threads[i], &attr, producer, (void*) inputFolder);
+		pthread_create(&threads[i], &attr, producer, (void*) &args);
 	}
 
 	pthread_create(&threads[threadCount], NULL, consumer, (void*) outputFolder);
