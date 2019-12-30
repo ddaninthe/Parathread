@@ -57,6 +57,7 @@ typedef struct stack_t {
 //pour eviter les variables globales
 static Stack stack;
 
+void inline apply_convolution(Color_e* c, int a, int b, int x, int y, Image* img, char* algo) __attribute__((always_inline));
 void apply_effect(Image* original, Image* new_i, char* algo);
 int bmpInFolder(char *dirname);
 void* consumer(void* arg);
@@ -64,6 +65,29 @@ void emptyDir(char* path);
 void* producer(void* args);
 void stack_destroy();
 void stack_init();
+
+void apply_convolution(Color_e* restrict c, int a, int b, int x, int y, Image* restrict img, char* algo) {
+	int xn = x + a - OFFSET;
+	int yn = y + b - OFFSET;
+
+	Pixel* p = &img->pixel_data[yn][xn];
+	
+	if (!strcmp(algo, "edgedetect")) {
+		c->Red += ((float) p->r) * KERNEL[a][b];
+		c->Green += ((float) p->g) * KERNEL[a][b];
+		c->Blue += ((float) p->b) * KERNEL[a][b];
+	}
+	else if (!strcmp(algo, "boxblur")) {
+		c->Red += ((float) p->r) * BOXBLUR[a][b];
+		c->Green += ((float) p->g) * BOXBLUR[a][b];
+		c->Blue += ((float) p->b) * BOXBLUR[a][b];
+	}
+	else if (!strcmp(algo, "sharpen")) {
+		c->Red += ((float) p->r) * SHARPEN[a][b];
+		c->Green += ((float) p->g) * SHARPEN[a][b];
+		c->Blue += ((float) p->b) * SHARPEN[a][b];
+	}
+}
 
 void apply_effect(Image* original, Image* new_i, char* algo) {
 
@@ -76,30 +100,17 @@ void apply_effect(Image* original, Image* new_i, char* algo) {
 		for (int x = OFFSET; x < w - OFFSET; x++) {
 			Color_e c = { .Red = 0, .Green = 0, .Blue = 0};
 
-			for(int a = 0; a < LENGTH; a++){
-				for(int b = 0; b < LENGTH; b++){
-					int xn = x + a - OFFSET;
-					int yn = y + b - OFFSET;
+			apply_convolution(&c, 0, 0, x, y, original, algo);
+			apply_convolution(&c, 0, 1, x, y, original, algo);
+			apply_convolution(&c, 0, 2, x, y, original, algo);
 
-					Pixel* p = &original->pixel_data[yn][xn];
+			apply_convolution(&c, 1, 0, x, y, original, algo);
+			apply_convolution(&c, 1, 1, x, y, original, algo);
+			apply_convolution(&c, 1, 2, x, y, original, algo);
 
-					if (!strcmp(algo, "edgedetect")) {
-						c.Red += ((float) p->r) * KERNEL[a][b];
-						c.Green += ((float) p->g) * KERNEL[a][b];
-						c.Blue += ((float) p->b) * KERNEL[a][b];
-					}
-					else if (!strcmp(algo, "boxblur")) {
-						c.Red += ((float) p->r) * BOXBLUR[a][b];
-						c.Green += ((float) p->g) * BOXBLUR[a][b];
-						c.Blue += ((float) p->b) * BOXBLUR[a][b];
-					}
-					else if (!strcmp(algo, "sharpen")) {
-						c.Red += ((float) p->r) * SHARPEN[a][b];
-						c.Green += ((float) p->g) * SHARPEN[a][b];
-						c.Blue += ((float) p->b) * SHARPEN[a][b];
-					}
-				}
-			}
+			apply_convolution(&c, 2, 0, x, y, original, algo);
+			apply_convolution(&c, 2, 1, x, y, original, algo);
+			apply_convolution(&c, 2, 2, x, y, original, algo);
 
 			Pixel* dest = &new_i->pixel_data[y][x];
 			dest->r = (uint8_t)  (c.Red <= 0 ? 0 : c.Red >= 255 ? 255 : c.Red);
@@ -286,7 +297,6 @@ int main(int argc, char** argv) {
 	char* argProducer[] = {inputFolder, algo};
 	
     for(int i = 0; i < threadCount; i++) {
-        //pthread_create(&threads[i], &attr, producer, ((void*) inputFolder, (void*) algo));
 		pthread_create(&threads[i], &attr, producer, (void*) argProducer);
 	}
 
