@@ -62,7 +62,7 @@ void apply_effect(Image* original, Image* new_i, char* algo);
 int bmpInFolder(char *dirname);
 void* consumer(void* arg);
 void emptyDir(char* path);
-void* producer(void* args);
+void* producer(void* arg, void* argAlgo);
 void stack_destroy();
 void stack_init();
 
@@ -178,10 +178,10 @@ void stack_destroy() {
 	pthread_mutex_destroy(&stack.lock);
 }
 
-void* producer(void* args) {
+void* producer(void* arg, void* argAlgo) {
 	printf("Producer created\n");
-	char* inputFolder = (char*) args;
-	char* algo = (char*) args + 1;
+	char* inputFolder = (char*) arg;
+	char* algo = (char*) argAlgo;
 	
 	while (stack.conversionAmount < stack.nbFiles) {
 		pthread_mutex_lock(&stack.lock);
@@ -297,7 +297,7 @@ int main(int argc, char** argv) {
 	char* argProducer[] = {inputFolder, algo};
 	
     for(int i = 0; i < threadCount; i++) {
-		pthread_create(&threads[i], &attr, producer, (void*) argProducer);
+		pthread_create(&threads[i], &attr, producer, ((void*) inputFolder, (void*) algo));
 	}
 
 	pthread_create(&threads[threadCount], NULL, consumer, (void*) outputFolder);
