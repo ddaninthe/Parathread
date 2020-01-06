@@ -9,8 +9,8 @@ Pour exécuter:
 ```
 [*exe name*] [*input folder*] [*output folder*] [*thread count*] [*algorithm*]
 ```
-
-*thread count*: doit être inférieur ou égale au nombre d'images dans *input folder*
-*algorithm* : *boxblur*, *edgedetect* ou *sharpen*.
+*ouput folder*: vidé au début du programme.  
+*thread count*: doit être inférieur ou égale au nombre d'images dans *input folder*.  
+*algorithm* : "*boxblur*", "*edgedetect*" ou "*sharpen*".
 
 Ex: `./apply-effect ./in/ ./out/ 3 boxblur`
